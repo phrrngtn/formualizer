@@ -7,15 +7,28 @@ description = "C-compatible FFI for Formualizer"
 [lib]
 crate-type = ["lib", "cdylib", "staticlib"]
 
+# Smoke-test binary needs the workbook backend; skip it in parse-only builds.
+[[bin]]
+name = "cffi_smoke_setup"
+required-features = ["workbook"]
+
+[features]
+# Parse surface only by default is NOT chosen — keep `workbook` in default so
+# existing consumers are unaffected. Build with `--no-default-features` for a
+# lean parse-only staticlib (drops the eval/workbook/arrow/umya stack), which is
+# what the DuckDB/SQLite/Python extensions link.
+default = ["workbook"]
+workbook = ["dep:formualizer-workbook", "dep:umya-spreadsheet"]
+
 [dependencies]
 formualizer-common = { workspace = true, features = ["serde"] }
 formualizer-parse = { workspace = true, features = ["serde"] }
-formualizer-workbook = { workspace = true, features = ["umya"] }
+formualizer-workbook = { workspace = true, features = ["umya"], optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 ciborium = "0.2"
 libc = "0.2"
-umya-spreadsheet = "=2.3.2"
+umya-spreadsheet = { version = "=2.3.2", optional = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }

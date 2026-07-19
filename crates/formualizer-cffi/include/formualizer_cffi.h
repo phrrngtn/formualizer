@@ -79,6 +79,13 @@ fz_buffer fz_parse_ast(
     fz_encoding_format format,
     fz_status *status);
 
+/* Distinct function names a formula calls -> JSON (or CBOR) array of strings. */
+fz_buffer fz_parse_functions(
+    const char *formula,
+    fz_parse_options options,
+    fz_encoding_format format,
+    fz_status *status);
+
 fz_buffer fz_parse_canonical_formula(
     const char *formula,
     fz_formula_dialect dialect,

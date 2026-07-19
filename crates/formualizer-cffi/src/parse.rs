@@ -69,6 +69,40 @@ pub enum CffiASTNode {
     },
 }
 
+impl CffiASTNode {
+    /// Collect every function name called anywhere in the tree (with duplicates,
+    /// in traversal order). Callers dedupe as they wish.
+    pub fn collect_function_names(&self, out: &mut Vec<String>) {
+        match self {
+            CffiASTNode::Function { name, args, .. } => {
+                out.push(name.clone());
+                for a in args {
+                    a.collect_function_names(out);
+                }
+            }
+            CffiASTNode::Call { callee, args, .. } => {
+                callee.collect_function_names(out);
+                for a in args {
+                    a.collect_function_names(out);
+                }
+            }
+            CffiASTNode::BinaryOp { left, right, .. } => {
+                left.collect_function_names(out);
+                right.collect_function_names(out);
+            }
+            CffiASTNode::UnaryOp { operand, .. } => operand.collect_function_names(out),
+            CffiASTNode::Array { elements, .. } => {
+                for row in elements {
+                    for e in row {
+                        e.collect_function_names(out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CffiToken {
     pub value: String,

@@ -6,8 +6,10 @@ use std::ptr;
 use std::slice;
 
 pub mod parse;
+#[cfg(feature = "workbook")]
 pub mod workbook;
 
+#[cfg(feature = "workbook")]
 pub use workbook::*;
 
 /// A buffer owned by Rust, to be freed by `fz_buffer_free`.
@@ -230,6 +232,78 @@ pub unsafe extern "C" fn fz_parse_ast(
             fz_encoding_format::FZ_ENCODING_CBOR => {
                 let mut buf = Vec::new();
                 ciborium::into_writer(&cffi_ast, &mut buf).map_err(|e| e.to_string())?;
+                Ok(buf)
+            }
+        }
+    })();
+
+    match result {
+        Ok(v) => {
+            if !status.is_null() {
+                unsafe {
+                    *status = fz_status::ok();
+                }
+            }
+            fz_buffer::from_vec(v)
+        }
+        Err(e) => {
+            if !status.is_null() {
+                unsafe {
+                    *status = fz_status::error(e);
+                }
+            }
+            fz_buffer::empty()
+        }
+    }
+}
+
+/// Distinct function names a formula calls, as a JSON (or CBOR) array of strings,
+/// in first-seen order (case-insensitive dedupe). The keystone for JOINing formula
+/// usage against a function catalog. Parse-only — no eval/workbook needed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fz_parse_functions(
+    formula: *const c_char,
+    options: fz_parse_options,
+    format: fz_encoding_format,
+    status: *mut fz_status,
+) -> fz_buffer {
+    use crate::parse::CffiASTNode;
+    use formualizer_parse::FormulaDialect;
+    use formualizer_parse::parser::parse_with_dialect;
+    use std::collections::HashSet;
+    use std::ffi::CStr;
+
+    if formula.is_null() {
+        if !status.is_null() {
+            unsafe {
+                *status = fz_status::error("formula is null".to_string());
+            }
+        }
+        return fz_buffer::empty();
+    }
+
+    let input = unsafe { CStr::from_ptr(formula).to_string_lossy() };
+
+    let result: Result<Vec<u8>, String> = (|| {
+        let dialect = FormulaDialect::from(options.dialect);
+        let ast = parse_with_dialect(&input, dialect).map_err(|e| e.to_string())?;
+        let cffi_ast = CffiASTNode::from_core(&ast, false);
+
+        let mut names = Vec::new();
+        cffi_ast.collect_function_names(&mut names);
+        let mut seen = HashSet::new();
+        let distinct: Vec<String> = names
+            .into_iter()
+            .filter(|n| seen.insert(n.to_uppercase()))
+            .collect();
+
+        match format {
+            fz_encoding_format::FZ_ENCODING_JSON => {
+                serde_json::to_vec(&distinct).map_err(|e| e.to_string())
+            }
+            fz_encoding_format::FZ_ENCODING_CBOR => {
+                let mut buf = Vec::new();
+                ciborium::into_writer(&distinct, &mut buf).map_err(|e| e.to_string())?;
                 Ok(buf)
             }
         }
