@@ -86,6 +86,32 @@ fz_buffer fz_parse_functions(
     fz_encoding_format format,
     fz_status *status);
 
+/* Classified references a formula makes -> JSON (or CBOR) array of objects:
+   { kind, text, sheet?, sheet_end?, r1?, c1?, r2?, c2?, row_abs, col_abs,
+     open_rows, open_cols, anchor?, anchor_row?, anchor_col?, operator?,
+     start, end }. Coordinates are 1-based inclusive (A1 = row 1, col 1); absent
+   fields (NULL box) are omitted. The edge source for the dependency graph. */
+fz_buffer fz_parse_references(
+    const char *formula,
+    fz_parse_options options,
+    fz_encoding_format format,
+    fz_status *status);
+
+/* Same references in a fixed-layout packed binary (magic "XLR1", little-endian)
+   for hosts that build typed columns without JSON/CBOR (de)serialization:
+     u32 magic; u32 count;
+     count × { u8 kind_tag; u8 flags; u8 present; u8 pad;
+               u32 r1,c1,r2,c2,anchor_row,anchor_col; u32 start,end;
+               (u32 len + bytes) × { text, sheet, sheet_end, anchor, operator } }
+   flags: bit0 row_abs, 1 col_abs, 2 open_rows, 3 open_cols.
+   present: bit0 r1, 1 c1, 2 r2, 3 c2, 4 anchor_row, 5 anchor_col (else NULL).
+   kind_tag: 0 cell,1 range,2 cell3d,3 range3d,4 external,5 table,6 named,
+             7 spill,8 implicit_intersection. String len 0 = NULL. */
+fz_buffer fz_parse_references_packed(
+    const char *formula,
+    fz_parse_options options,
+    fz_status *status);
+
 /* R1C1 canonical rendering relative to cell (row,col): a translation-invariant
    structural fingerprint string (drag-filled cells render identically). */
 fz_buffer fz_parse_r1c1(
