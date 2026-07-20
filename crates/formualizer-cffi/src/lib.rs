@@ -389,56 +389,6 @@ pub unsafe extern "C" fn fz_parse_references(
     }
 }
 
-/// Same references as `fz_parse_references`, in a fixed-layout packed binary
-/// (magic "XLR1"; see `parse::pack_refs`) — for hosts that build typed columns
-/// without paying JSON/CBOR (de)serialization, e.g. DuckDB's LIST(STRUCT). No
-/// `format` argument: the encoding is the packed one. Parse-only.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn fz_parse_references_packed(
-    formula: *const c_char,
-    options: fz_parse_options,
-    status: *mut fz_status,
-) -> fz_buffer {
-    use formualizer_parse::FormulaDialect;
-    use std::ffi::CStr;
-
-    if formula.is_null() {
-        if !status.is_null() {
-            unsafe {
-                *status = fz_status::error("formula is null".to_string());
-            }
-        }
-        return fz_buffer::empty();
-    }
-
-    let input = unsafe { CStr::from_ptr(formula).to_string_lossy() };
-
-    let result: Result<Vec<u8>, String> = (|| {
-        let dialect = FormulaDialect::from(options.dialect);
-        let refs = crate::parse::parse_references(&input, dialect)?;
-        Ok(crate::parse::pack_refs(&refs))
-    })();
-
-    match result {
-        Ok(v) => {
-            if !status.is_null() {
-                unsafe {
-                    *status = fz_status::ok();
-                }
-            }
-            fz_buffer::from_vec(v)
-        }
-        Err(e) => {
-            if !status.is_null() {
-                unsafe {
-                    *status = fz_status::error(e);
-                }
-            }
-            fz_buffer::empty()
-        }
-    }
-}
-
 /// Render a formula in R1C1 canonical form relative to cell (row, col) — a
 /// translation-invariant structural fingerprint (two drag-filled cells yield the
 /// identical string). Returns the string directly (not JSON). Parse-only.

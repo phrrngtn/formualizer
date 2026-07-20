@@ -589,80 +589,6 @@ pub fn parse_references(
     Ok(refs)
 }
 
-// ── Packed binary encoding (fz_parse_references_packed) ──────────────────────
-// A fixed-layout, string-arena-free wire for hosts that want typed columns
-// without paying JSON (de)serialization — e.g. DuckDB building a LIST(STRUCT).
-// Little-endian. Numeric fields are always written; a presence bitmask marks
-// which are valid (NULL otherwise). Strings are length-prefixed inline.
-//
-//   u32 magic = 0x584C5231 ("XLR1")
-//   u32 count
-//   count × record:
-//     u8  kind_tag   0..8 (see kind_tag)
-//     u8  flags      bit0 row_abs, bit1 col_abs, bit2 open_rows, bit3 open_cols
-//     u8  present    bit0 r1, bit1 c1, bit2 r2, bit3 c2, bit4 anchor_row, bit5 anchor_col
-//     u8  _pad
-//     u32 r1,c1,r2,c2,anchor_row,anchor_col      (value, or 0 when not present)
-//     u32 start, end
-//     str text, sheet, sheet_end, anchor, operator   (each: u32 len + bytes; len 0 = NULL)
-
-pub const REFS_PACKED_MAGIC: u32 = 0x584C_5231; // "XLR1"
-
-fn kind_tag(k: &str) -> u8 {
-    match k {
-        "cell" => 0,
-        "range" => 1,
-        "cell3d" => 2,
-        "range3d" => 3,
-        "external" => 4,
-        "table" => 5,
-        "named" => 6,
-        "spill" => 7,
-        "implicit_intersection" => 8,
-        _ => 255,
-    }
-}
-
-fn put_str(out: &mut Vec<u8>, s: &str) {
-    out.extend_from_slice(&(s.len() as u32).to_le_bytes());
-    out.extend_from_slice(s.as_bytes());
-}
-
-pub fn pack_refs(refs: &[CffiRef]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + refs.len() * 48);
-    out.extend_from_slice(&REFS_PACKED_MAGIC.to_le_bytes());
-    out.extend_from_slice(&(refs.len() as u32).to_le_bytes());
-    for r in refs {
-        out.push(kind_tag(&r.kind));
-        out.push(
-            (r.row_abs as u8)
-                | ((r.col_abs as u8) << 1)
-                | ((r.open_rows as u8) << 2)
-                | ((r.open_cols as u8) << 3),
-        );
-        out.push(
-            (r.r1.is_some() as u8)
-                | ((r.c1.is_some() as u8) << 1)
-                | ((r.r2.is_some() as u8) << 2)
-                | ((r.c2.is_some() as u8) << 3)
-                | ((r.anchor_row.is_some() as u8) << 4)
-                | ((r.anchor_col.is_some() as u8) << 5),
-        );
-        out.push(0u8); // pad
-        for v in [r.r1, r.c1, r.r2, r.c2, r.anchor_row, r.anchor_col] {
-            out.extend_from_slice(&v.unwrap_or(0).to_le_bytes());
-        }
-        out.extend_from_slice(&(r.start as u32).to_le_bytes());
-        out.extend_from_slice(&(r.end as u32).to_le_bytes());
-        put_str(&mut out, &r.text);
-        put_str(&mut out, r.sheet.as_deref().unwrap_or(""));
-        put_str(&mut out, r.sheet_end.as_deref().unwrap_or(""));
-        put_str(&mut out, r.anchor.as_deref().unwrap_or(""));
-        put_str(&mut out, r.operator.as_deref().unwrap_or(""));
-    }
-    out
-}
-
 #[cfg(test)]
 mod ref_tests {
     use super::parse_references;
@@ -720,15 +646,5 @@ mod ref_tests {
         assert_eq!(got[3], ("cell", "D1", None));
         // The spill anchor carries a numeric origin for the anchor-identity join.
         assert_eq!((r[0].anchor_row, r[0].anchor_col), (Some(1), Some(1)));
-    }
-
-    #[test]
-    fn packed_roundtrips_count_and_magic() {
-        let r = refs("=A1+B2");
-        let packed = super::pack_refs(&r);
-        assert_eq!(&packed[0..4], &super::REFS_PACKED_MAGIC.to_le_bytes());
-        let count = u32::from_le_bytes(packed[4..8].try_into().unwrap());
-        assert_eq!(count as usize, r.len());
-        assert_eq!(count, 2);
     }
 }
