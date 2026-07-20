@@ -329,6 +329,58 @@ pub unsafe extern "C" fn fz_parse_functions(
     }
 }
 
+/// Render a formula in R1C1 canonical form relative to cell (row, col) — a
+/// translation-invariant structural fingerprint (two drag-filled cells yield the
+/// identical string). Returns the string directly (not JSON). Parse-only.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fz_parse_r1c1(
+    formula: *const c_char,
+    row: u32,
+    col: u32,
+    options: fz_parse_options,
+    status: *mut fz_status,
+) -> fz_buffer {
+    use formualizer_parse::FormulaDialect;
+    use formualizer_parse::parser::parse_with_dialect;
+    use std::ffi::CStr;
+
+    if formula.is_null() {
+        if !status.is_null() {
+            unsafe {
+                *status = fz_status::error("formula is null".to_string());
+            }
+        }
+        return fz_buffer::empty();
+    }
+
+    let input = unsafe { CStr::from_ptr(formula).to_string_lossy() };
+
+    let result: Result<Vec<u8>, String> = (|| {
+        let dialect = FormulaDialect::from(options.dialect);
+        let ast = parse_with_dialect(&input, dialect).map_err(|e| e.to_string())?;
+        Ok(crate::parse::render_r1c1(&ast, row, col).into_bytes())
+    })();
+
+    match result {
+        Ok(v) => {
+            if !status.is_null() {
+                unsafe {
+                    *status = fz_status::ok();
+                }
+            }
+            fz_buffer::from_vec(v)
+        }
+        Err(e) => {
+            if !status.is_null() {
+                unsafe {
+                    *status = fz_status::error(e);
+                }
+            }
+            fz_buffer::empty()
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fz_parse_canonical_formula(
     formula: *const c_char,

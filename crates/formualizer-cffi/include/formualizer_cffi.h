@@ -86,6 +86,15 @@ fz_buffer fz_parse_functions(
     fz_encoding_format format,
     fz_status *status);
 
+/* R1C1 canonical rendering relative to cell (row,col): a translation-invariant
+   structural fingerprint string (drag-filled cells render identically). */
+fz_buffer fz_parse_r1c1(
+    const char *formula,
+    uint32_t row,
+    uint32_t col,
+    fz_parse_options options,
+    fz_status *status);
+
 fz_buffer fz_parse_canonical_formula(
     const char *formula,
     fz_formula_dialect dialect,

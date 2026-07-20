@@ -103,6 +103,71 @@ impl CffiASTNode {
     }
 }
 
+// ── R1C1 canonical rendering (translation-invariant fingerprint form) ──
+// Ported from formulon's daf.rs. Relative references render as R[dr]C[dc]
+// offsets from the anchor cell, so two drag-filled cells (which differ only by a
+// uniform translation of their relative refs) produce the *identical* string,
+// while a structurally different formula does not. Fully parenthesised so
+// structure is unambiguous.
+fn r1c1_axis(prefix: char, coord: u32, abs: bool, anchor: u32) -> String {
+    if abs {
+        format!("{prefix}{coord}")
+    } else {
+        format!("{prefix}[{}]", coord as i64 - anchor as i64)
+    }
+}
+
+fn r1c1_ref(rt: &ReferenceType, row: u32, col: u32) -> String {
+    let sheet = |s: &Option<String>| s.as_deref().map(|x| format!("{x}!")).unwrap_or_default();
+    match rt {
+        ReferenceType::Cell { sheet: sh, row: r, col: c, row_abs, col_abs } => format!(
+            "{}{}{}",
+            sheet(sh),
+            r1c1_axis('R', *r, *row_abs, row),
+            r1c1_axis('C', *c, *col_abs, col),
+        ),
+        ReferenceType::Range {
+            sheet: sh, start_row, start_col, end_row, end_col,
+            start_row_abs, start_col_abs, end_row_abs, end_col_abs,
+        } => {
+            let end = |ro: &Option<u32>, ra: bool, co: &Option<u32>, ca: bool| format!(
+                "{}{}",
+                ro.map(|v| r1c1_axis('R', v, ra, row)).unwrap_or_default(),
+                co.map(|v| r1c1_axis('C', v, ca, col)).unwrap_or_default(),
+            );
+            format!(
+                "{}{}:{}",
+                sheet(sh),
+                end(start_row, *start_row_abs, start_col, *start_col_abs),
+                end(end_row, *end_row_abs, end_col, *end_col_abs),
+            )
+        }
+        other => format!("{other}"), // 3D / external / table / named: A1 Display fallback
+    }
+}
+
+/// Canonical R1C1 serialization of a formula AST at cell (`row`, `col`).
+pub fn render_r1c1(node: &CoreASTNode, row: u32, col: u32) -> String {
+    let kids = |xs: &[CoreASTNode]| {
+        xs.iter().map(|a| render_r1c1(a, row, col)).collect::<Vec<_>>().join(",")
+    };
+    match &node.node_type {
+        ASTNodeType::Literal(v) => format!("{v}"),
+        ASTNodeType::Reference { reference, .. } => r1c1_ref(reference, row, col),
+        ASTNodeType::UnaryOp { op, expr } => format!("({op} {})", render_r1c1(expr, row, col)),
+        ASTNodeType::BinaryOp { op, left, right } => {
+            format!("({} {op} {})", render_r1c1(left, row, col), render_r1c1(right, row, col))
+        }
+        ASTNodeType::Function { name, args } => format!("{name}({})", kids(args)),
+        ASTNodeType::Call { callee, args } => {
+            format!("{}({})", render_r1c1(callee, row, col), kids(args))
+        }
+        ASTNodeType::Array(rows) => {
+            format!("{{{}}}", rows.iter().map(|r| kids(r)).collect::<Vec<_>>().join(";"))
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CffiToken {
     pub value: String,
